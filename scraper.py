@@ -10,113 +10,135 @@ from playwright_stealth import stealth_async
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()]
+    format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
 CONFIG_FILE = "config.json"
 
-def load_system_configurations():
+
+def load_config():
     if not os.path.exists(CONFIG_FILE):
-        logging.critical(f"Config file not found: {CONFIG_FILE}")
+        logging.critical(f"Missing config file: {CONFIG_FILE}")
         return None
-    with open(CONFIG_FILE, "r") as file:
-        return json.load(file)
+    with open(CONFIG_FILE, "r") as f:
+        return json.load(f)
 
-async def execute_human_scroll_simulation(page):
-    logging.info("Human scroll simulation running...")
-    for _ in range(3):
-        scroll_offset = random.randint(300, 700)
-        await page.evaluate(f"window.scrollBy(0, {scroll_offset})")
-        await asyncio.sleep(random.uniform(0.4, 0.9))
 
-async def run_scraper_engine():
-    logging.info("Scraper is starting...")
+async def human_scroll(page):
+    for _ in range(random.randint(2, 5)):
+        await page.evaluate(f"window.scrollBy(0, {random.randint(300, 800)})")
+        await asyncio.sleep(random.uniform(0.5, 1.2))
 
-    config = load_system_configurations()
+
+async def retry(action, retries=3):
+    for attempt in range(retries):
+        try:
+            return await action()
+        except Exception as e:
+            logging.warning(f"Retry {attempt+1}/{retries} failed: {e}")
+            await asyncio.sleep(2)
+    return None
+
+
+async def run_scraper():
+    config = load_config()
     if not config:
         return
 
-    target_url = config.get("target_url")
+    url = config.get("target_url")
     max_pages = config.get("extraction_limit_pages", 1)
-    output_excel = config.get("excel_output_filename", "extracted_output.xlsx")
-    headless = config.get("headless_mode_enabled", False)
+    output_file = config.get("excel_output_filename", "output.xlsx")
+    headless = config.get("headless_mode_enabled", True)
 
-    extracted_records = []
+    selectors = config.get("selectors", {})
+    container_sel = selectors.get("container", ".quote")
+    text_sel = selectors.get("text", ".text")
+    author_sel = selectors.get("author", ".author")
+
+    proxy = config.get("proxy", None)
+
+    records = []
 
     async with async_playwright() as p:
-        try:
-            browser = await p.chromium.launch(headless=headless)
+        browser = await p.chromium.launch(headless=headless)
 
-            # Create context first, then page
-            context = await browser.new_context(
-                viewport={"width": 1366, "height": 768},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
-            page = await context.new_page()
+        context_args = {
+            "viewport": {"width": 1366, "height": 768},
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
 
-            # Apply stealth mode to avoid bot detection
-            await stealth_async(page)
+        if proxy:
+            context_args["proxy"] = proxy
 
-            await page.goto(target_url, timeout=60000)
-            current_page = 1
+        context = await browser.new_context(**context_args)
+        page = await context.new_page()
 
-            while current_page <= max_pages:
-                logging.info(f"Processing Page {current_page} of {max_pages}...")
+        await stealth_async(page)
 
-                await page.wait_for_selector(".quote", timeout=15000)
-                await execute_human_scroll_simulation(page)
+        await retry(lambda: page.goto(url, timeout=60000))
 
-                quote_elements = await page.query_selector_all(".quote")
+        current_page = 1
 
-                for element in quote_elements:
-                    try:
-                        text_node = await element.query_selector(".text")
-                        author_node = await element.query_selector(".author")
+        while current_page <= max_pages:
+            logging.info(f"Scraping page {current_page}/{max_pages}")
 
-                        if text_node and author_node:
-                            text = (await text_node.inner_text()).strip()
-                            author = (await author_node.inner_text()).strip()
-                            extracted_records.append({
-                                "Target Page": current_page,
-                                "Author Identity": author,
-                                "Scraped Payload": text,
-                                "Extraction Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                            })
-                    except Exception:
-                        continue
+            await retry(lambda: page.wait_for_selector(container_sel))
 
-                if current_page < max_pages:
-                    next_button = await page.query_selector("li.next a")
-                    if next_button:
-                        await asyncio.sleep(random.uniform(1.5, 3.5))
-                        await next_button.click()
-                        # Wait for the next page to fully load
-                        await page.wait_for_load_state("networkidle")
-                        current_page += 1
-                    else:
-                        logging.info("No next page found. Stopping here.")
-                        break
+            await human_scroll(page)
+
+            elements = await page.query_selector_all(container_sel)
+
+            for el in elements:
+                try:
+                    text_node = await el.query_selector(text_sel)
+                    author_node = await el.query_selector(author_sel)
+
+                    if text_node and author_node:
+                        text = (await text_node.inner_text()).strip()
+                        author = (await author_node.inner_text()).strip()
+
+                        records.append({
+                            "page": current_page,
+                            "author": author,
+                            "text": text,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                        })
+
+                except Exception as e:
+                    logging.warning(f"Parsing error: {e}")
+
+            if current_page < max_pages:
+                next_btn = await page.query_selector("li.next a")
+                if next_btn:
+                    await asyncio.sleep(random.uniform(1, 3))
+                    await retry(lambda: next_btn.click())
+                    await page.wait_for_load_state("networkidle")
+                    current_page += 1
                 else:
                     break
-
-            await browser.close()
-            logging.info("Browser closed successfully.")
-
-            if extracted_records:
-                df = pd.DataFrame(extracted_records)
-                df.to_excel(output_excel, index=False)
-                logging.info(f"Data saved successfully: {output_excel}")
-
-                print("\n" + "="*70)
-                print(df.head(5).to_string())
-                print("="*70)
             else:
-                logging.error("No data was extracted.")
+                break
 
-        except Exception as e:
-            logging.error(f"An error occurred: {e}")
+        await browser.close()
+
+    if records:
+        df = pd.DataFrame(records)
+
+        # Excel
+        df.to_excel(output_file, index=False)
+
+        # JSON
+        json_file = output_file.replace(".xlsx", ".json")
+        df.to_json(json_file, orient="records", indent=2)
+
+        logging.info(f"Saved Excel: {output_file}")
+        logging.info(f"Saved JSON: {json_file}")
+    else:
+        logging.error("No data scraped.")
+
 
 if __name__ == "__main__":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    asyncio.run(run_scraper_engine())
+    if os.name == "nt":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+    asyncio.run(run_scraper())
