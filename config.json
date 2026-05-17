@@ -1,0 +1,6 @@
+{
+    "target_url": "http://quotes.toscrape.com",
+    "extraction_limit_pages": 3,
+    "excel_output_filename": "dynamic_scraped_records.xlsx",
+    "headless_mode_enabled": false
+}
