@@ -13,13 +13,11 @@
 
 ### ▶️ Scraper Running Logs
 
-<img width="720" height="457" alt="terminal output" src="https://github.com/user-attachments/assets/1bcd7b45-308c-4d30-b67d-29901e50d738" />
----
+<img width="1321" height="689" alt="terminal output" src="https://github.com/user-attachments/assets/cfbed9e7-e231-49a9-acc3-326fda6c0304" />---
 
 ### 📊 Extracted Data Preview
 
-<img width="1320" height="678" alt="terminal output 2" src="https://github.com/user-attachments/assets/98e6581a-d19e-4cc2-9349-c77c913f8735" />
----
+<img width="1009" height="165" alt="terminal output 2" src="https://github.com/user-attachments/assets/8498b0dd-1298-479e-994a-4081c62be287" />---
 
 ## 💻 System Requirements
 
