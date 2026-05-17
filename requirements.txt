@@ -1,4 +1,4 @@
-playwright
-playwright-stealth
-pandas
-openpyxl
+playwright>=1.40
+playwright-stealth==1.0.6
+pandas>=2.0
+openpyxl>=3.1
